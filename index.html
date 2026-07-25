@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>简历信息提取工具</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js">
+</script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #f5f6fa;
+    --surface: #ffffff;
+    --border: #e2e5f0;
+    --text: #1a1d2b;
+    --text-secondary: #6b7094;
+    --primary: #4f6ef7;
+    --primary-hover: #3b5ae0;
+    --primary-light: #eef1fe;
+    --success: #22c55e;
+    --success-bg: #f0fdf4;
+    --danger: #ef4444;
+    --radius: 10px;
+    --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+    --shadow-lg: 0 4px 24px rgba(0,0,0,.08);
+  }
+  html { font-size: 15px; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh; padding: 32px 24px;
+  }
+  .app { max-width: 1100px; margin: 0 auto; }
+
+  .server-bar {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 18px; margin-bottom: 20px;
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: .85rem;
+  }
+  .server-bar .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--success);
+  }
+  .server-bar .dot.offline { background: var(--danger); }
+  .server-bar .url-box {
+    color: var(--primary); font-family: "SF Mono", Menlo, monospace; font-size: .82rem;
+    background: var(--primary-light); padding: 3px 10px; border-radius: 6px; user-select: all;
+  }
+  .server-bar .info { color: var(--text-secondary); font-size: .8rem; }
+
+  .header { margin-bottom: 24px; }
+  .header h1 {
+    font-size: 1.6rem; font-weight: 700; display: flex; align-items: center; gap: 10px;
+  }
+  .header h1 svg { width: 30px; height: 30px; color: var(--primary); }
+  .header p { color: var(--text-secondary); margin-top: 4px; font-size: .92rem; }
+
+  .drop-zone {
+    background: var(--surface); border: 2px dashed var(--border);
+    border-radius: var(--radius); padding: 48px 24px; text-align: center;
+    cursor: pointer; transition: border-color .2s, background .2s;
+  }
+  .drop-zone:hover { border-color: var(--primary); background: var(--primary-light); }
+  .drop-zone.dragover { border-color: var(--primary); background: var(--primary-light); }
+  .drop-zone.has-file { border-style: solid; border-color: var(--success); background: var(--success-bg); padding: 20px 24px; }
+  .drop-zone-icon { font-size: 2.4rem; margin-bottom: 12px; color: var(--text-secondary); }
+  .drop-zone.has-file .drop-zone-icon { font-size: 1.6rem; margin-bottom: 0; color: var(--success); }
+  .drop-zone-text { color: var(--text-secondary); font-size: .95rem; }
+  .drop-zone-text strong { color: var(--primary); font-weight: 600; }
+  .drop-zone-hint { font-size: .82rem; color: var(--text-secondary); margin-top: 8px; }
+  .drop-zone input[type="file"] { display: none; }
+  .drop-zone-file { display: flex; align-items: center; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .drop-zone-file-name { font-weight: 600; font-size: .95rem; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .drop-zone-file-size { font-size: .82rem; color: var(--text-secondary); }
+  .drop-zone-reset { cursor: pointer; color: var(--danger); font-size: .82rem; background: none; border: none; text-decoration: underline; }
+
+  .status-bar { margin-top: 16px; display: none; }
+  .status-bar.active { display: flex; align-items: center; gap: 10px; }
+  .spinner { width: 20px; height: 20px; border: 2.5px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .controls { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .btn {
+    padding: 9px 20px; border-radius: 8px; border: none;
+    font-size: .9rem; font-weight: 600; cursor: pointer;
+    transition: background .15s; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+  .btn-outline { background: transparent; color: var(--text-secondary); border: 1.5px solid var(--border); }
+  .btn-outline:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-danger:hover:not(:disabled) { background: #dc2626; }
+
+  .table-wrap { margin-top: 24px; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+  .table-header { padding: 14px 20px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: .95rem; display: flex; align-items: center; justify-content: space-between; }
+  .table-header .count { font-weight: 400; color: var(--text-secondary); font-size: .85rem; }
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; min-width: 720px; }
+  thead { background: var(--bg); }
+  th { padding: 12px 14px; text-align: left; font-weight: 600; color: var(--text-secondary); font-size: .83rem; white-space: nowrap; border-bottom: 1px solid var(--border); }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #f8f9ff; }
+  td input { width: 100%; border: 1px solid transparent; padding: 4px 6px; border-radius: 4px; font-size: .88rem; font-family: inherit; background: transparent; transition: border-color .15s; }
+  td input:focus { outline: none; border-color: var(--primary); background: #fff; }
+  td input:hover { border-color: var(--border); }
+  .table-empty { text-align: center; padding: 60px 20px; color: var(--text-secondary); }
+  .table-empty svg { width: 48px; height: 48px; color: var(--border); margin-bottom: 12px; }
+  .table-empty p { font-size: .9rem; }
+  .row-actions button { background: none; border: none; cursor: pointer; color: var(--text-secondary); padding: 2px; border-radius: 4px; transition: color .15s; }
+  .row-actions button:hover { color: var(--danger); }
+
+  .raw-text-wrap { margin-top: 12px; display: none; }
+  .raw-text-wrap.open { display: block; }
+  .raw-text-toggle { background: none; border: none; color: var(--text-secondary); font-size: .85rem; cursor: pointer; text-decoration: underline; }
+  .raw-text-toggle:hover { color: var(--primary); }
+  .raw-text-box { margin-top: 8px; padding: 14px; border-radius: 8px; background: #fafafa; border: 1px solid var(--border); white-space: pre-wrap; font-size: .82rem; font-family: "SF Mono", Menlo, monospace; max-height: 400px; overflow-y: auto; line-height: 1.6; }
+
+  .toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); background: #1a1d2b; color: #fff; padding: 12px 24px; border-radius: 8px; font-size: .88rem; font-weight: 500; box-shadow: var(--shadow-lg); opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 999; }
+  .toast.show { opacity: 1; }
+
+  @media (max-width: 640px) {
+    body { padding: 16px 12px; }
+    .drop-zone { padding: 32px 16px; }
+    .controls { flex-direction: column; }
+    .btn { justify-content: center; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- Server status bar -->
+  <div class="server-bar">
+    <span><span class="dot" id="serverDot"></span><span id="serverStatus">正在连接...</span></span>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <span class="info">👇 把这个链接发给同事</span>
+      <span class="url-box" id="shareUrl">加载中...</span>
+    </div>
+  </div>
+
+  <div class="header">
+    <h1>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+        <polyline points="10 9 9 9 8 9"/>
+      </svg>
+      简历信息提取
+    </h1>
+    <p>上传简历自动提取信息 · 所有数据保存在服务器，团队共享</p>
+  </div>
+
+  <!-- Upload -->
+  <div class="drop-zone" id="dropZone">
+    <div class="drop-zone-icon" id="dropIcon">📄</div>
+    <div class="drop-zone-text" id="dropText">拖拽简历文件到此处，或 <strong>点击选择文件</strong></div>
+    <div class="drop-zone-hint">支持 PDF、PNG、JPG 格式</div>
+    <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg,.webp">
+  </div>
+
+  <div class="status-bar" id="statusBar">
+    <div class="spinner"></div>
+    <span id="statusText">正在解析简历...</span>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button class="btn btn-primary" id="btnExtract" disabled>📄 提取信息</button>
+    <button class="btn btn-outline" id="btnExportCsv" disabled>📥 导出 CSV</button>
+    <button class="btn btn-outline" id="btnCopyTable" disabled>📋 复制表格</button>
+    <button class="btn btn-danger" id="btnClearAll">🗑 清空</button>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap">
+    <div class="table-header">
+      <span>候选人信息</span>
+      <span class="count" id="rowCount">共 0 人</span>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:28px">#</th>
+            <th>姓名</th>
+            <th>性别</th>
+            <th>学校</th>
+            <th>学院</th>
+            <th>专业</th>
+            <th>就读年限</th>
+            <th>联系电话</th>
+            <th style="width:50px"></th>
+          </tr>
+        </thead>
+        <tbody id="tableBody">
+          <tr><td colspan="9">
+            <div class="table-empty">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+              <p>暂无数据，上传简历开始提取</p>
+            </div>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Raw text -->
+  <div class="raw-text-wrap" id="rawTextWrap">
+    <button class="raw-text-toggle" id="rawTextToggle">显示提取的原始文本</button>
+    <div class="raw-text-box" id="rawTextBox" style="display:none"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   简历信息提取工具 v2 - 服务器版
+   PDF 逐行提取 + 改进解析器 + 服务器 API
+   ============================================================ */
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ---- State ----
+let candidates = [];
+let currentFile = null;
+let rawText = '';
+let saveTimer = null;
+const API = window.location.origin;
+
+// ---- DOM refs ----
+const $ = id => document.getElementById(id);
+const dropZone = $('dropZone');
+const fileInput = $('fileInput');
+const dropText = $('dropText');
+const dropIcon = $('dropIcon');
+const statusBar = $('statusBar');
+const statusText = $('statusText');
+const btnExtract = $('btnExtract');
+const btnExportCsv = $('btnExportCsv');
+const btnCopyTable = $('btnCopyTable');
+const btnClearAll = $('btnClearAll');
+const tableBody = $('tableBody');
+const rowCount = $('rowCount');
+const rawTextWrap = $('rawTextWrap');
+const rawTextToggle = $('rawTextToggle');
+const rawTextBox = $('rawTextBox');
+const serverDot = $('serverDot');
+const serverStatus = $('serverStatus');
+const shareUrl = $('shareUrl');
+
+// ---- Init ----
+(async function init() {
+  await checkServer();
+  await loadCandidates();
+  renderTable();
+  setInterval(autoRefresh, 5000);
+})();
+
+// ---- Server check & auto-refresh ----
+async function checkServer() {
+  try {
+    const r = await fetch(`${API}/api/candidates`);
+    if (r.ok) {
+      serverDot.className = 'dot';
+      serverStatus.textContent = '服务器已连接 · 数据实时同步';
+      const host = window.location.hostname;
+      const port = window.location.port;
+      shareUrl.textContent = `http://${host}:${port}`;
+      return true;
+    }
+  } catch(e) {}
+  serverDot.className = 'dot offline';
+  serverStatus.textContent = '服务器未连接';
+  shareUrl.textContent = '请启动服务器';
+  return false;
+}
+
+async function loadCandidates() {
+  try {
+    const r = await fetch(`${API}/api/candidates`);
+    if (r.ok) { candidates = await r.json(); }
+  } catch(e) { /* offline fallback */ }
+}
+
+async function autoRefresh() {
+  try {
+    const r = await fetch(`${API}/api/candidates`);
+    if (!r.ok) return;
+    const data = await r.json();
+    const changed = data.length !== candidates.length ||
+      (data.length > 0 && candidates.length > 0 && data[data.length-1].id !== candidates[candidates.length-1].id);
+    if (changed) { candidates = data; renderTable(); }
+    serverDot.className = 'dot';
+    serverStatus.textContent = '服务器已连接 · 数据实时同步';
+  } catch(e) {
+    serverDot.className = 'dot offline';
+    serverStatus.textContent = '服务器未连接';
+  }
+}
+
+// ---- Toast ----
+let toastTimer;
+function toast(msg, err) {
+  clearTimeout(toastTimer);
+  const el = $('toast');
+  el.textContent = msg; el.classList.add('show');
+  el.style.background = err ? '#dc2626' : '#1a1d2b';
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ---- File ----
+dropZone.addEventListener('click', e => { if (!e.target.closest('.drop-zone-reset')) fileInput.click(); });
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
+
+function handleFile(f) {
+  const ext = f.name.split('.').pop().toLowerCase();
+  if (!['pdf','png','jpg','jpeg','webp'].includes(ext)) { toast('不支持的文件格式', true); return; }
+  currentFile = f;
+  const sz = f.size > 1024*1024 ? (f.size/1024/1024).toFixed(1)+' MB' : (f.size/1024).toFixed(0)+' KB';
+  dropZone.classList.add('has-file');
+  dropIcon.textContent = '✅';
+  dropText.innerHTML = `<div class="drop-zone-file"><span class="drop-zone-file-name">${f.name}</span><span class="drop-zone-file-size">${sz}</span><button class="drop-zone-reset" id="resetFile">更换文件</button></div>`;
+  document.getElementById('resetFile').onclick = e => { e.stopPropagation(); reset(); };
+  btnExtract.disabled = false;
+}
+
+function reset() {
+  currentFile = null; rawText = '';
+  dropZone.classList.remove('has-file'); dropIcon.textContent = '📄';
+  dropText.innerHTML = '拖拽简历文件到此处，或 <strong>点击选择文件</strong>';
+  fileInput.value = ''; btnExtract.disabled = true;
+  statusBar.classList.remove('active');
+  rawTextWrap.classList.remove('open'); rawTextBox.style.display = 'none';
+}
+
+// ---- Extract ----
+btnExtract.addEventListener('click', async () => {
+  if (!currentFile) return;
+  btnExtract.disabled = true; statusBar.classList.add('active');
+  statusText.textContent = '正在解析简历...';
+  try {
+    const ext = currentFile.name.split('.').pop().toLowerCase();
+    const text = ext === 'pdf' ? await extractPDF(currentFile) : await extractImage(currentFile);
+    rawText = text;
+    statusText.textContent = '正在提取信息...';
+    const parsed = parseResume(text);
+    // Save to server
+    const r = await fetch(`${API}/api/candidates`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(parsed)
+    });
+    if (r.ok) {
+      const saved = await r.json();
+      candidates.push(saved);
+      renderTable();
+      toast('✅ 提取成功');
+      rawTextBox.textContent = text;
+      rawTextWrap.classList.add('open'); rawTextBox.style.display = 'block';
+      reset();
+    } else {
+      throw new Error('服务器保存失败');
+    }
+  } catch(err) {
+    toast('❌ ' + err.message, true);
+    statusBar.classList.remove('active'); btnExtract.disabled = true;
+  }
+});
+
+/* ---- 改进的 PDF 逐行提取 ---- */
+async function extractPDF(file) {
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+  let lines = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const content = await page.getTextContent();
+    const map = {};
+    for (const item of content.items) {
+      const y = Math.round(item.transform[5]);
+      const k = 'y' + y;
+      if (!map[k]) map[k] = [];
+      map[k].push({ x: item.transform[4], t: item.str });
+    }
+    const ys = Object.keys(map).sort((a,b) => parseInt(b.slice(1)) - parseInt(a.slice(1)));
+    for (const yk of ys) {
+      const line = map[yk].sort((a,b) => a.x - b.x).map(i => i.t).join('');
+      lines.push(line);
+    }
+  }
+  // Merge broken lines
+  const merged = [];
+  for (const l of lines) {
+    const t = l.trim();
+    if (!t) continue;
+    if (merged.length > 0 && (/[：，、;:,\-]$/.test(merged[merged.length-1]) || /^[a-z0-9(\-（]/.test(t) || t.length < 4)) {
+      merged[merged.length-1] += t; continue;
+    }
+    merged.push(t);
+  }
+  return merged.join('\n');
+}
+
+/* ---- OCR ---- */
+async function extractImage(file) {
+  if (typeof Tesseract === 'undefined') {
+    statusText.textContent = '正在加载 OCR 引擎...';
+    await new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+  }
+  return (await Tesseract.recognize(file, 'chi_sim+eng', { logger: m => { if (m.status === 'recognizing text') statusText.textContent = `OCR 识别中... ${(m.progress*100).toFixed(0)}%`; } })).data.text;
+}
+
+/* ---- 改进的解析器 ---- */
+function parseResume(text) {
+  if (!text) return {name:'',gender:'',school:'',college:'',major:'',years:'',phone:''};
+  const t = text.replace(/\r\n?/g,'\n').replace(/\t/g,' ').replace(/\u00a0/g,' ');
+  return { name: $name(t), gender: $gender(t), school: $school(t), college: $college(t), major: $major(t), years: $years(t), phone: $phone(t) };
+}
+
+function $name(text) {
+  const m = text.match(/(?:姓\s*名|名\s*字|姓\s*氏)[：:\s]*([\u4e00-\u9fff·]{2,4})/);
+  if (m) return m[1];
+  for (const line of text.split('\n').map(l=>l.trim()).filter(Boolean)) {
+    if (/^(简历|个人简历|Resume|CV|教育背景|工作经历|项目经验|专业技能|自我评价|联系方式|个人信息)/i.test(line)) continue;
+    if (/大学|学院|公司|有限|电话|手机|邮箱|@/.test(line)) continue;
+    const nm = line.match(/^([\u4e00-\u9fff·]{2,3})/);
+    if (nm) return nm[1];
+    break;
+  }
+  return '';
+}
+function $gender(text) { const m = text.match(/性\s*别[：:\s]*([男女])/); return m ? m[1] : ''; }
+function $school(text) {
+  for (const p of [
+    /(?:毕业?院校?|就读?院校?|学校|教育背景)[：:\s]*([\u4e00-\u9fff()（）]{2,30}(?:大学|学院|学校|分校|书院))/,
+    /([\u4e00-\u9fff()（）]{2,30}(?:大学|学院|学校))\s*[/／]/,
+    /([\u4e00-\u9fff()（）]{2,}(?:大学|学院|学校))\s*$/,
+  ]) { const m = text.match(p); if (m) return m[1].replace(/^(?:毕业?院校?|学校|就读?院校?|教育背景)\s*[：:]\s*/,''); }
+  const f = text.match(/([\u4e00-\u9fff()（）]{2,}(?:大学|学院|学校))/);
+  return f ? f[1] : '';
+}
+function $college(text) {
+  const m1 = text.match(/(?:学\s*院|二级学院|所属学院)[：:\s]*([\u4e00-\u9fff]{2,30})/);
+  if (m1) return m1[1];
+  const m2 = text.match(/([\u4e00-\u9fff]{2,}(?:学院))\s*(?:专业|就读|学生|本科|硕士|博士|20\d{2})/);
+  if (m2 && !/大学/.test(m2[1]) && !/学校/.test(m2[1]) && !/毕业/.test(m2[1]) && !/医[院学]/.test(m2[1])) return m2[1];
+  const m3 = text.match(/[\u4e00-\u9fff]{2,}(?:大学|学院)\s+([\u4e00-\u9fff]{2,}(?:学院))/);
+  return m3 ? m3[1] : '';
+}
+function $major(text) {
+  for (const p of [
+    /(?:专\s*业|主\s*修|攻\s*读|所学专业|研究方向|方\s*向)[：:\s]*([^\s\n，,。、]{2,30})/,
+    /([\u4e00-\u9fff]{2,}(?:科学与技术|工程|科学|技术|管理|设计|艺术|教育|文学|理学|工学|法学|经济学|医学|农学|文学|语言学|哲学|历史学|数学|物理|化学|生物|自动化|软件|网络|通信|电子|电气|机械|土木|建筑|材料|环境|食品|药学|护理|临床|口腔|中医|预防|检验|影像|康复|麻醉))/,
+  ]) { const m = text.match(p); if (m) return m[1].trim(); }
+  const e = text.match(/(?:20\d{2}.*?大学.*?([\u4e00-\u9fff]{2,}(?:工程|科学|技术|管理|经济|金融|法学|文学|理学|医学)))/);
+  return e ? e[1] : '';
+}
+function $years(text) {
+  const f = text.match(/(\d{4})\s*[.年/\-]\s*(\d{1,2})?\s*(?:月)?\s*[-–至到~～]\s*(\d{4})\s*[.年/\-]\s*(\d{1,2})?\s*(?:月)?/);
+  if (f) { const s = f[2] ? `${f[1]}.${f[2].padStart(2,'0')}` : f[1]; const e = f[4] ? `${f[3]}.${f[4].padStart(2,'0')}` : f[3]; return `${s} - ${e}`; }
+  const s = text.match(/(\d{4})\s*[-–]\s*(\d{4})\s*(?:年)?/);
+  if (s) return `${s[1]} - ${s[2]}`;
+  const c = text.match(/(\d{4})\s*年\s*[-–至到]\s*(\d{4})\s*年/);
+  return c ? `${c[1]} - ${c[2]}` : '';
+}
+function $phone(text) {
+  const m = text.match(/(1[3-9]\d{9})/);
+  return m ? m[1] : '';
+}
+
+// ---- Render ----
+function renderTable() {
+  if (candidates.length === 0) {
+    tableBody.innerHTML = `<tr><td colspan="9"><div class="table-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg><p>暂无数据，请上传简历进行提取</p></div></td></tr>`;
+  } else {
+    tableBody.innerHTML = candidates.map((c,i) => `<tr data-i="${i}">
+      <td style="color:var(--text-secondary);font-size:.82rem">${i+1}</td>
+      <td><input value="${esc(c.name)}" data-f="name" data-i="${i}"></td>
+      <td><input value="${esc(c.gender)}" data-f="gender" data-i="${i}"></td>
+      <td><input value="${esc(c.school)}" data-f="school" data-i="${i}"></td>
+      <td><input value="${esc(c.college)}" data-f="college" data-i="${i}"></td>
+      <td><input value="${esc(c.major)}" data-f="major" data-i="${i}"></td>
+      <td><input value="${esc(c.years)}" data-f="years" data-i="${i}"></td>
+      <td><input value="${esc(c.phone)}" data-f="phone" data-i="${i}"></td>
+      <td class="row-actions"><button onclick="del(${i})" title="删除"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button></td>
+    </tr>`).join('');
+    document.querySelectorAll('#tableBody input').forEach(inp => inp.addEventListener('input', onEdit));
+  }
+  rowCount.textContent = `共 ${candidates.length} 人`;
+  [btnExportCsv, btnCopyTable].forEach(b => b.disabled = !candidates.length);
+}
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function onEdit(e) {
+  const inp = e.target;
+  const idx = parseInt(inp.dataset.i);
+  const f = inp.dataset.f;
+  if (!candidates[idx]) return;
+  candidates[idx][f] = inp.value;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    const c = candidates[idx];
+    if (!c || !c.id) return;
+    try { await fetch(`${API}/api/candidates/${c.id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(c) }); } catch(e) {}
+  }, 600);
+}
+
+async function del(i) {
+  const c = candidates[i];
+  if (!c) return;
+  if (c.id) { try { await fetch(`${API}/api/candidates/${c.id}`, { method: 'DELETE' }); } catch(e) {} }
+  candidates.splice(i, 1);
+  renderTable();
+  toast('已删除');
+}
+
+// ---- Clear ----
+btnClearAll.addEventListener('click', async () => {
+  if (!candidates.length) return;
+  if (!confirm('确定清空所有数据吗？服务器和所有人的数据都会被删除')) return;
+  try { await fetch(`${API}/api/candidates`, { method: 'DELETE' }); } catch(e) {}
+  candidates = []; renderTable();
+  rawTextWrap.classList.remove('open'); rawTextBox.style.display = 'none';
+  toast('已清空');
+});
+
+// ---- Export CSV ----
+btnExportCsv.addEventListener('click', () => {
+  if (!candidates.length) return;
+  const h = ['姓名','性别','学校','学院','专业','就读年限','联系电话'];
+  const csv = '\uFEFF' + h.join(',') + '\n' + candidates.map(c => [c.name,c.gender,c.school,c.college,c.major,c.years,c.phone].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const b = new Blob([csv], {type:'text/csv;charset=utf-8;'}); const u = URL.createObjectURL(b);
+  const a = document.createElement('a'); a.href=u; a.download='候选人信息.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(u);
+  toast('✅ CSV 已导出');
+});
+
+// ---- Copy ----
+btnCopyTable.addEventListener('click', async () => {
+  if (!candidates.length) return;
+  const h = ['姓名','性别','学校','学院','专业','就读年限','联系电话'];
+  const t = h.join('\t') + '\n' + candidates.map(c => [c.name,c.gender,c.school,c.college,c.major,c.years,c.phone].join('\t')).join('\n');
+  try { await navigator.clipboard.writeText(t); toast('✅ 已复制'); }
+  catch { const ta = document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); toast('✅ 已复制'); }
+});
+
+// ---- Raw text ----
+rawTextToggle.addEventListener('click', () => {
+  const h = rawTextBox.style.display === 'none';
+  rawTextBox.style.display = h ? 'block' : 'none';
+  rawTextToggle.textContent = h ? '隐藏提取的原始文本' : '显示提取的原始文本';
+});
+</script>
+</body>
+</html>
